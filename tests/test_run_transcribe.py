@@ -68,6 +68,7 @@ class AssetSelectionTest(unittest.TestCase):
     def _manifest(self):
         return {"version": "v0.1.0", "assets": [
             {"os": "windows", "arch": "x64", "backend": "cpu", "filename": "qwen3-asr-windows-x64-cpu.zip", "sha256": "x", "cli": "q3asr.exe"},
+            {"os": "windows", "arch": "x64", "backend": "cuda", "filename": "qwen3-asr-windows-x64-cuda.zip", "sha256": "x", "cli": "q3asr.exe"},
             {"os": "windows", "arch": "x64", "backend": "vulkan", "filename": "qwen3-asr-windows-x64-vulkan.zip", "sha256": "x", "cli": "q3asr.exe"},
             {"os": "linux", "arch": "x64", "backend": "cpu", "filename": "qwen3-asr-linux-x64-cpu.zip", "sha256": "x", "cli": "q3asr"},
             {"os": "macos", "arch": "arm64", "backend": "metal", "filename": "qwen3-asr-macos-arm64-metal.zip", "sha256": "x", "cli": "q3asr"},
@@ -78,10 +79,22 @@ class AssetSelectionTest(unittest.TestCase):
         a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="cpu")
         self.assertEqual(a["filename"], "qwen3-asr-windows-x64-cpu.zip")
 
-    def test_auto_prefers_vulkan_over_cpu_when_present(self):
+    def test_auto_prefers_cuda_when_available(self):
         man = self._manifest()
-        a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="auto")
-        self.assertEqual(a["backend"], "vulkan")
+        with mock.patch("run_transcribe._cuda_available", return_value=True):
+            a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="auto")
+        self.assertEqual(a["backend"], "cuda")
+
+    def test_auto_picks_cpu_without_cuda(self):
+        man = self._manifest()
+        with mock.patch("run_transcribe._cuda_available", return_value=False):
+            a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="auto")
+        self.assertEqual(a["backend"], "cpu")
+
+    def test_auto_prefers_metal_on_macos(self):
+        man = self._manifest()
+        a = run_transcribe.select_asset(man, os_name="macos", arch="arm64", backend="auto")
+        self.assertEqual(a["backend"], "metal")
 
     def test_auto_falls_back_to_cpu(self):
         man = {"version": "v", "assets": [a for a in self._manifest()["assets"] if a["os"] == "linux"]}

@@ -69,6 +69,12 @@ def fetch_manifest(version='latest') -> dict:
     raise RuntimeError('release has no manifest.json')
 
 
+def _cuda_available():
+    if platform.system() == 'Darwin':
+        return False
+    return shutil.which('nvidia-smi') is not None
+
+
 def select_asset(manifest: dict, os_name: str, arch: str, backend: str) -> dict:
     assets = manifest['assets']
     cands = [a for a in assets if a['os'] == os_name and a['arch'] == arch]
@@ -79,7 +85,15 @@ def select_asset(manifest: dict, os_name: str, arch: str, backend: str) -> dict:
             if a['backend'] == backend:
                 return a
         raise RuntimeError(f'no {backend} asset for {os_name}-{arch}; have {[a["backend"] for a in cands]}')
-    for b in ('cuda', 'vulkan', 'metal', 'cpu'):
+    # auto: pick the fastest backend this machine can actually run.
+    # - macOS: Metal is always present.
+    # - Windows/Linux: CUDA only if nvidia-smi exists; otherwise CPU (always
+    #   works). Vulkan is opt-in via TRANSCRIBE_BACKEND (hard to detect).
+    if os_name == 'macos':
+        order = ('metal', 'cpu')
+    else:
+        order = ('cuda', 'cpu') if _cuda_available() else ('cpu',)
+    for b in order:
         for a in cands:
             if a['backend'] == b:
                 return a
