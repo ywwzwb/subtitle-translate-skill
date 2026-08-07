@@ -48,6 +48,8 @@ description: Use when translating subtitle files (SRT字幕) or word-timestamped
 
 `python3 <skill_dir>/scripts/run_transcribe.py <audio>.mp3 -y`
 
+> 若 ASR 运行时缺失, 自动从 `ywwzwb/qwen3-asr-universal` 最新 release 下载匹配 `os/arch/后端` 的 zip 到 `~/.cache/opencode-translate/asr/` 并缓存; 后端优先级 cuda→vulkan→metal→cpu, 可用 `TRANSCRIBE_BACKEND` 指定。模型在 q3asr 首次运行时自动下载(默认 1.7B)到 `~/.cache/q3asr/models/`。手动指定 `TRANSCRIBE_EXE` 仍为最高优先级。
+
 - 产出同名 `<audio>.txt`、`<audio>.srt`、`<audio>.json`(词级时间戳 `[{text,start,end}]`, 秒)。
 - **ASR 自动识别语种**(Qwen3-ASR 支持多语言); 如需强制指定语种再传 `-l <Language>`。
 - 长音频: 先 `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 <audio>.mp3` 得知时长, 给 bash 命令设置足够大的超时(本地 1.7B 模型约 0.05×时长 秒, 另加模型初始化)。

@@ -9,6 +9,11 @@ Executable path resolution (highest priority first):
     2. TRANSCRIBE_EXE environment variable
     3. DEFAULT_EXE (hardcoded below)
 
+If no --exe/TRANSCRIBE_EXE is given and DEFAULT_EXE does not exist, the
+q3asr runtime is auto-downloaded from the ASR repo release manifest into
+~/.cache/opencode-translate/asr/ (backend from TRANSCRIBE_BACKEND,
+default auto: cuda->vulkan->metal->cpu; version from TRANSCRIBE_ASR_VER).
+
 Timestamps from a --seek-start/--duration run are RELATIVE to the segment
 start; use timestamp_to_yaml.py --offset to restore absolute times.
 
@@ -22,11 +27,106 @@ Usage:
     python run_transcribe.py audio.mp3 --seek-start 1140 --duration 30 -y
 """
 import argparse
+import hashlib
+import json
 import os
+import platform
+import shutil
 import subprocess
 import sys
+import urllib.request
+import zipfile
+from pathlib import Path
 
 DEFAULT_EXE = r'C:\Users\zwb\Documents\Qwen3-ASR-Transcribe\transcribe.exe'
+
+ASR_REPO = 'ywwzwb/qwen3-asr-universal'
+CACHE_ROOT = Path(os.environ.get('TRANSCRIBE_CACHE',
+                                 Path.home() / '.cache' / 'opencode-translate' / 'asr'))
+
+_OS_MAP = {'Windows': 'windows', 'Linux': 'linux', 'Darwin': 'macos'}
+
+
+def os_arch() -> tuple:
+    os_name = _OS_MAP.get(platform.system(), platform.system().lower())
+    m = platform.machine().lower()
+    arch = 'arm64' if m in ('aarch64', 'arm64') else ('x64' if m in ('amd64', 'x86_64', 'x64') else m)
+    return os_name, arch
+
+
+def fetch_manifest(version='latest') -> dict:
+    if version == 'latest':
+        url = f'https://api.github.com/repos/{ASR_REPO}/releases/latest'
+    else:
+        url = f'https://api.github.com/repos/{ASR_REPO}/releases/tags/{version}'
+    with urllib.request.urlopen(url, timeout=60) as r:
+        d = json.load(r)
+    for a in d['assets']:
+        if a['name'] == 'manifest.json':
+            murl = a['browser_download_url']
+            with urllib.request.urlopen(murl, timeout=60) as r2:
+                return json.load(r2)
+    raise RuntimeError('release has no manifest.json')
+
+
+def select_asset(manifest: dict, os_name: str, arch: str, backend: str) -> dict:
+    assets = manifest['assets']
+    cands = [a for a in assets if a['os'] == os_name and a['arch'] == arch]
+    if not cands:
+        raise RuntimeError(f'no asset for {os_name}-{arch}')
+    if backend != 'auto':
+        for a in cands:
+            if a['backend'] == backend:
+                return a
+        raise RuntimeError(f'no {backend} asset for {os_name}-{arch}; have {[a["backend"] for a in cands]}')
+    for b in ('cuda', 'vulkan', 'metal', 'cpu'):
+        for a in cands:
+            if a['backend'] == b:
+                return a
+    raise RuntimeError(f'no asset for {os_name}-{arch}')
+
+
+def _download(url, dest):
+    tmp = dest.with_suffix(dest.suffix + '.part')
+    try:
+        with urllib.request.urlopen(url, timeout=300) as resp, open(tmp, 'wb') as f:
+            shutil.copyfileobj(resp, f, length=1 << 20)
+        tmp.replace(dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def install_asset(cache: Path, zip_path: Path, cli_name: str, sha256=None) -> Path:
+    if sha256:
+        got = hashlib.file_digest(zip_path.open('rb'), 'sha256').hexdigest()
+        if got != sha256:
+            raise RuntimeError(f'sha256 mismatch: {zip_path}')
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(cache)
+    exe = cache / cli_name
+    if not exe.exists():
+        raise RuntimeError(f'cli not found in zip: {cli_name}')
+    return exe
+
+
+def ensure_auto_exe(backend='auto', version='latest') -> tuple:
+    """Return (exe_path, backend_name)."""
+    os_name, arch = os_arch()
+    man = fetch_manifest(version)
+    asset = select_asset(man, os_name, arch, backend)
+    cache = CACHE_ROOT / version
+    exe = cache / asset['cli']
+    if exe.exists():
+        return str(exe), asset['backend']
+    cache.mkdir(parents=True, exist_ok=True)
+    zip_path = cache / asset['filename']
+    url = (f'https://github.com/{ASR_REPO}/releases/download/'
+           f'{man["version"]}/{asset["filename"]}')
+    _download(url, zip_path)
+    exe = install_asset(cache, zip_path, asset['cli'], asset['sha256'])
+    zip_path.unlink(missing_ok=True)
+    return str(exe), asset['backend']
 
 
 def resolve_exe(exe=None):
@@ -74,8 +174,19 @@ def main():
 
     exe = resolve_exe(args.exe)
     if not os.path.isfile(exe):
-        sys.exit(f'error: transcribe executable not found: {exe}\n'
-                 f'Set the TRANSCRIBE_EXE environment variable or pass --exe.')
+        if not args.exe and not os.environ.get('TRANSCRIBE_EXE'):
+            backend = os.environ.get('TRANSCRIBE_BACKEND', 'auto')
+            version = os.environ.get('TRANSCRIBE_ASR_VER', 'latest')
+            try:
+                exe, backend_name = ensure_auto_exe(backend=backend, version=version)
+            except Exception as e:
+                sys.exit(f'error: transcribe executable not found: {exe}\n'
+                         f'Set the TRANSCRIBE_EXE environment variable or pass --exe.\n'
+                         f'auto-download from {ASR_REPO} failed: {e}')
+            print(f'auto-downloaded q3asr runtime ({backend_name}, {version}): {exe}')
+        else:
+            sys.exit(f'error: transcribe executable not found: {exe}\n'
+                     f'Set the TRANSCRIBE_EXE environment variable or pass --exe.')
     exe = os.path.abspath(exe)
 
     cmd = build_cmd(exe, args.input, args.seek_start, args.duration,
