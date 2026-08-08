@@ -103,8 +103,9 @@ main:
 1. **选窗口**: 坏区域起点往前 ~3s、终点往后 ~3s, 得 `X` 与 `D = end - X`。
 2. **重转该段**: `python3 <skill_dir>/scripts/run_transcribe.py <audio>.mp3 --seek-start X --duration D -y`(时间戳相对切片起点)。
 3. **还原绝对时间**: `python3 <skill_dir>/scripts/timestamp_to_yaml.py <audio>.json seg.yaml --offset X`。
-4. **拼回**: `python3 <skill_dir>/scripts/splice_yaml.py main.yaml seg.yaml main.new.yaml`。
-5. **复核**: 检查 splice 摘要(删除/插入条数、字数对比、警告)。确认无漏词后, 用 edit 以 `main.new.yaml` 内容替换 `main.yaml`; 若丢词, 扩大窗口重转或手工 edit 修正。
+4. **核对覆盖**: 用 `--offset` 后 seg.yaml 最后一条的 `to` 应 ≈ `X + D`。若明显早于 `X + D`(重转输出被截断), 扩大窗口重转, 不要继续拼。
+5. **拼回(必须传窗口参数)**: `python3 <skill_dir>/scripts/splice_yaml.py main.yaml seg.yaml main.new.yaml --seek-start X --duration D`。脚本会用**请求窗口**而非段内容范围做删除, 并校验覆盖——若重转段被截断, 脚本会报错拒绝拼回(必要时可 `--force`, 但先扩大窗口重转为宜)。
+6. **复核**: 检查 splice 输出(删除清单 + 字数警告 + LOSS 行)。**每次 splice 都会默认打印被删 cue 清单**; 若出现 `LOSS:` 行, 说明有条被删 cue 的文本没在重转内容里出现——若是完好句子, 扩大窗口重转。确认无漏词后, 用 edit 以 `main.new.yaml` 内容替换 `main.yaml`; 若丢词, 扩大窗口重转或手工 edit 修正。
 
 **必须用 `splice_yaml.py` 拼回, 禁止手工拼接重转片段**: 手动把新 cue 贴进 main.yaml 极易产生重复/重叠 cue(同一 from 出现两次), 用脚本按时间窗口替换可避免。替换后若发现重复 `from`, 说明拼接过当, 用 splice 重做。
 
