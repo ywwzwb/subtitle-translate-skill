@@ -79,32 +79,78 @@ class AssetSelectionTest(unittest.TestCase):
         a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="cpu")
         self.assertEqual(a["filename"], "qwen3-asr-windows-x64-cpu.zip")
 
-    def test_auto_prefers_cuda_when_available(self):
+    def test_select_explicit_backend(self):
         man = self._manifest()
-        with mock.patch("run_transcribe._cuda_available", return_value=True):
-            a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="auto")
+        a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="cuda")
         self.assertEqual(a["backend"], "cuda")
 
-    def test_auto_picks_cpu_without_cuda(self):
-        man = self._manifest()
-        with mock.patch("run_transcribe._cuda_available", return_value=False):
-            a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="auto")
-        self.assertEqual(a["backend"], "cpu")
-
-    def test_auto_prefers_metal_on_macos(self):
-        man = self._manifest()
-        a = run_transcribe.select_asset(man, os_name="macos", arch="arm64", backend="auto")
-        self.assertEqual(a["backend"], "metal")
-
-    def test_auto_falls_back_to_cpu(self):
-        man = {"version": "v", "assets": [a for a in self._manifest()["assets"] if a["os"] == "linux"]}
-        a = run_transcribe.select_asset(man, os_name="linux", arch="x64", backend="auto")
-        self.assertEqual(a["backend"], "cpu")
+    def test_select_falls_back_to_cpu_when_backend_missing(self):
+        man = {"version": "v", "assets": [a for a in self._manifest()["assets"] if a["os"] == "windows"]}
+        a = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="vulkan")
+        # vulkan exists here; use a backend that does NOT, e.g. 'metal' on windows
+        a2 = run_transcribe.select_asset(man, os_name="windows", arch="x64", backend="metal")
+        self.assertEqual(a2["backend"], "cpu")
 
     def test_no_match_raises(self):
         man = self._manifest()
         with self.assertRaises(RuntimeError):
-            run_transcribe.select_asset(man, os_name="macos", arch="x64", backend="cuda")
+            run_transcribe.select_asset(man, os_name="linux", arch="arm64", backend="cpu")
+
+    def test_probe_backend(self):
+        with mock.patch("run_transcribe.platform.system", return_value="Darwin"):
+            self.assertEqual(run_transcribe.probe_backend(), "metal")
+        with mock.patch("run_transcribe.platform.system", return_value="Windows"):
+            with mock.patch("run_transcribe.shutil.which", side_effect=lambda n: n == "nvidia-smi"):
+                self.assertEqual(run_transcribe.probe_backend(), "cuda")
+            with mock.patch("run_transcribe.shutil.which", side_effect=lambda n: n == "vulkaninfo"):
+                self.assertEqual(run_transcribe.probe_backend(), "vulkan")
+            with mock.patch("run_transcribe.shutil.which", return_value=None):
+                self.assertEqual(run_transcribe.probe_backend(), "cpu")
+
+    def test_resolve_backend_env_wins(self):
+        with mock.patch.dict(os.environ, {"TRANSCRIBE_BACKEND": "vulkan"}, clear=True):
+            self.assertEqual(run_transcribe.resolve_backend(), "vulkan")
+
+    def test_resolve_backend_reuses_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "config.yaml"
+            with mock.patch.object(run_transcribe, "CONFIG_PATH", cfg):
+                run_transcribe.save_config(backend="cpu")
+                self.assertEqual(run_transcribe.resolve_backend(), "cpu")
+
+    def test_resolve_backend_probes_and_saves_on_first_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "config.yaml"
+            with mock.patch.object(run_transcribe, "CONFIG_PATH", cfg):
+                with mock.patch("run_transcribe.probe_backend", return_value="cuda"):
+                    self.assertEqual(run_transcribe.resolve_backend(), "cuda")
+                # saved now; probe not called again (verify_backend mocked so the
+                # saved backend passes re-verification on this machine)
+                with mock.patch("run_transcribe.verify_backend", return_value=True):
+                    with mock.patch("run_transcribe.probe_backend", return_value="cpu") as p:
+                        self.assertEqual(run_transcribe.resolve_backend(), "cuda")
+                        p.assert_not_called()
+
+    def test_resolve_backend_stale_config_reprobes(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "config.yaml"
+            with mock.patch.object(run_transcribe, "CONFIG_PATH", cfg):
+                run_transcribe.save_config(backend="cuda")
+                with mock.patch("run_transcribe.verify_backend", return_value=False):
+                    with mock.patch("run_transcribe.probe_backend", return_value="cpu"):
+                        self.assertEqual(run_transcribe.resolve_backend(), "cpu")
+
+    def test_resolve_model_default_1_7b(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "config.yaml"
+            with mock.patch.object(run_transcribe, "CONFIG_PATH", cfg):
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    self.assertEqual(run_transcribe.resolve_model(), "1.7b")
+                self.assertEqual(run_transcribe.load_config().get("model"), "1.7b")
+
+    def test_resolve_model_env_wins(self):
+        with mock.patch.dict(os.environ, {"TRANSCRIBE_MODEL": "0.6b"}, clear=True):
+            self.assertEqual(run_transcribe.resolve_model(), "0.6b")
 
     def test_cache_dir_layout(self):
         with tempfile.TemporaryDirectory() as d:

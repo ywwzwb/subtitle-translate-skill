@@ -48,7 +48,7 @@ description: Use when translating subtitle files (SRT字幕) or word-timestamped
 
 `python3 <skill_dir>/scripts/run_transcribe.py <audio>.mp3 -y`
 
-> 若 ASR 运行时缺失, 自动从 `ywwzwb/qwen3-asr-universal` 最新 release 下载匹配 `os/arch/后端` 的 zip 到 `~/.cache/opencode-translate/asr/` 并缓存; 后端优先级 cuda→vulkan→metal→cpu, 可用 `TRANSCRIBE_BACKEND` 指定。模型在 q3asr 首次运行时自动下载(默认 1.7B)到 `~/.cache/q3asr/models/`。手动指定 `TRANSCRIBE_EXE` 仍为最高优先级。
+> 若 ASR 运行时缺失, 自动从 `ywwzwb/qwen3-asr-universal` 最新 release 下载匹配 `os/arch/后端` 的 zip 到 `~/.cache/opencode-translate/asr/` 并缓存。**后端自动探测**: 首次运行时探测本机最优方案(cuda→vulkan→metal→cpu, 依据 `nvidia-smi`/`vulkaninfo` 是否存在), 结果保存到本 skill 目录的 `config.yaml`(像 terminology.yaml 一样持久共享), 后续直接复用不再探测; 跨机器时做轻量复核, 失效则重新探测。**模型默认 1.7B**, 与后端一起存入 `config.yaml`, 首次由 q3asr 自动下载到 `~/.cache/q3asr/models/`(已有缓存则复用)。可用环境变量覆盖: `TRANSCRIBE_BACKEND`(cuda/vulkan/metal/cpu)、`TRANSCRIBE_MODEL`(如 1.7b/0.6b)、`TRANSCRIBE_ASR_VER`(默认 latest)。手动指定 `TRANSCRIBE_EXE` 仍为最高优先级。
 
 - 产出同名 `<audio>.txt`、`<audio>.srt`、`<audio>.json`(词级时间戳 `[{text,start,end}]`, 秒)。
 - **ASR 自动识别语种**(Qwen3-ASR 支持多语言); 如需强制指定语种再传 `-l <Language>`。
