@@ -7,15 +7,14 @@ The .json output is a word-level timestamp list [{text, start, end}]
 Executable path resolution (highest priority first):
     1. --exe argument
     2. TRANSCRIBE_EXE environment variable
-    3. DEFAULT_EXE (hardcoded below)
+    3. auto-download the q3asr runtime (default)
 
-If no --exe/TRANSCRIBE_EXE is given and DEFAULT_EXE does not exist, the
-q3asr runtime is auto-downloaded from the ASR repo release manifest into
-~/.cache/opencode-translate/asr/. The best backend for this machine is
-probed (cuda->vulkan->metal->cpu), cached in <skill_dir>/config.yaml
-(like terminology.yaml) and reused on later runs. Overrides:
-TRANSCRIBE_BACKEND (cuda/vulkan/metal/cpu), TRANSCRIBE_MODEL (default
-1.7b), TRANSCRIBE_ASR_VER (default latest).
+If no --exe/TRANSCRIBE_EXE is given, the q3asr runtime is auto-downloaded from
+the ASR repo release manifest into ~/.cache/opencode-translate/asr/. The best
+backend for this machine is probed (cuda->vulkan->metal->cpu), cached in
+<skill_dir>/config.yaml (like terminology.yaml) and reused on later runs.
+Overrides: TRANSCRIBE_BACKEND (cuda/vulkan/metal/cpu), TRANSCRIBE_MODEL
+(default 1.7b), TRANSCRIBE_ASR_VER (default latest).
 
 Timestamps from a --seek-start/--duration run are RELATIVE to the segment
 start; use timestamp_to_yaml.py --offset to restore absolute times.
@@ -42,8 +41,6 @@ import zipfile
 from pathlib import Path
 
 import yaml
-
-DEFAULT_EXE = r'C:\Users\zwb\Documents\Qwen3-ASR-Transcribe\transcribe.exe'
 
 ASR_REPO = 'ywwzwb/qwen3-asr-universal'
 CACHE_ROOT = Path(os.environ.get('TRANSCRIBE_CACHE',
@@ -212,7 +209,7 @@ def resolve_exe(exe=None):
     env = os.environ.get('TRANSCRIBE_EXE')
     if env:
         return env
-    return DEFAULT_EXE
+    return None
 
 
 def build_cmd(exe, audio, seek_start=None, duration=None, language=None,
@@ -258,7 +255,7 @@ def main():
     is_q3asr = False
     device = None
     model = None
-    if not os.path.isfile(exe):
+    if not exe or not os.path.isfile(exe):
         if not args.exe and not os.environ.get('TRANSCRIBE_EXE'):
             backend = resolve_backend()
             model = resolve_model()
@@ -266,7 +263,7 @@ def main():
             try:
                 exe, backend_name = ensure_auto_exe(backend=backend, version=version)
             except Exception as e:
-                sys.exit(f'error: transcribe executable not found: {exe}\n'
+                sys.exit(f'error: no transcribe executable and auto-download failed\n'
                          f'Set the TRANSCRIBE_EXE environment variable or pass --exe.\n'
                          f'auto-download from {ASR_REPO} failed: {e}')
             is_q3asr = True

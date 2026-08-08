@@ -13,9 +13,8 @@ import run_transcribe
 
 
 class TestResolveExe(unittest.TestCase):
-    @mock.patch.dict(os.environ, {}, clear=True)
-    def test_default(self):
-        self.assertEqual(run_transcribe.resolve_exe(), run_transcribe.DEFAULT_EXE)
+    def test_default_none_triggers_auto_download(self):
+        self.assertIsNone(run_transcribe.resolve_exe())
 
     @mock.patch.dict(os.environ, {'TRANSCRIBE_EXE': 'X:/custom.exe'}, clear=True)
     def test_env(self):
