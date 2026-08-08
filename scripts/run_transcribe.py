@@ -189,7 +189,7 @@ def ensure_auto_exe(backend='auto', version='latest') -> tuple:
         backend = resolve_backend()
     man = fetch_manifest(version)
     asset = select_asset(man, os_name, arch, backend)
-    cache = CACHE_ROOT / version
+    cache = CACHE_ROOT / man['version']   # key by real version so upgrades re-download
     exe = cache / asset['cli']
     if exe.exists():
         return str(exe), asset['backend']
