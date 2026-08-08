@@ -36,6 +36,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -58,17 +59,29 @@ def os_arch() -> tuple:
     return os_name, arch
 
 
+def _urlopen_with_retry(url, timeout=60, retries=3):
+    last = None
+    for i in range(retries):
+        try:
+            return urllib.request.urlopen(url, timeout=timeout)
+        except Exception as e:
+            last = e
+            if i < retries - 1:
+                time.sleep(2 * (i + 1))
+    raise last
+
+
 def fetch_manifest(version='latest') -> dict:
     if version == 'latest':
         url = f'https://api.github.com/repos/{ASR_REPO}/releases/latest'
     else:
         url = f'https://api.github.com/repos/{ASR_REPO}/releases/tags/{version}'
-    with urllib.request.urlopen(url, timeout=60) as r:
+    with _urlopen_with_retry(url) as r:
         d = json.load(r)
     for a in d['assets']:
         if a['name'] == 'manifest.json':
             murl = a['browser_download_url']
-            with urllib.request.urlopen(murl, timeout=60) as r2:
+            with _urlopen_with_retry(murl) as r2:
                 return json.load(r2)
     raise RuntimeError('release has no manifest.json')
 
@@ -197,10 +210,21 @@ def ensure_auto_exe(backend='auto', version='latest') -> tuple:
     zip_path = cache / asset['filename']
     url = (f'https://github.com/{ASR_REPO}/releases/download/'
            f'{man["version"]}/{asset["filename"]}')
-    _download(url, zip_path)
-    exe = install_asset(cache, zip_path, asset['cli'], asset['sha256'])
-    zip_path.unlink(missing_ok=True)
-    return str(exe), asset['backend']
+    last = None
+    for attempt in range(3):
+        try:
+            _download(url, zip_path)
+            exe = install_asset(cache, zip_path, asset['cli'], asset['sha256'])
+            zip_path.unlink(missing_ok=True)
+            return str(exe), asset['backend']
+        except Exception as e:
+            last = e
+            zip_path.unlink(missing_ok=True)
+            exe.unlink(missing_ok=True)
+            if attempt < 2:
+                print(f'download failed ({e}); retrying {attempt + 1}/3', file=sys.stderr)
+                time.sleep(3 * (attempt + 1))
+    raise last
 
 
 def resolve_exe(exe=None):
