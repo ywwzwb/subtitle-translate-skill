@@ -183,8 +183,11 @@ def _download(url, dest):
 
 def install_asset(cache: Path, zip_path: Path, cli_name: str, sha256=None) -> Path:
     if sha256:
-        got = hashlib.file_digest(zip_path.open('rb'), 'sha256').hexdigest()
-        if got != sha256:
+        digest = hashlib.sha256()
+        with zip_path.open('rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                digest.update(chunk)
+        if digest.hexdigest() != sha256:
             raise RuntimeError(f'sha256 mismatch: {zip_path}')
     with zipfile.ZipFile(zip_path) as z:
         z.extractall(cache)

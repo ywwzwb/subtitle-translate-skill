@@ -111,13 +111,15 @@ def main():
         start = ms_to_ass(start_ms)
         end = ms_to_ass(ts_to_ms(item['to']))
         if chs:
+            chs = chs.replace(chr(10), r'\N')
             events.append((start_ms, 0,
                            f'Dialogue: 0,{start},{end},Translation,,0,0,0,,'
-                           f'{chs.replace(chr(10), r"\N")}'))
+                           f'{chs}'))
         if en:
+            en = en.replace(chr(10), r'\N')
             events.append((start_ms, 1,
                            f'Dialogue: 1,{start},{end},Original,,0,0,0,,'
-                           f'{en.replace(chr(10), r"\N")}'))
+                           f'{en}'))
 
     events.extend(build_annotation_events(data.get('annotations', [])))
     events.sort(key=lambda e: (e[0], e[1]))
